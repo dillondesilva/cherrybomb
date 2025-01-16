@@ -6,12 +6,12 @@ package cmd
 import (
 	"os"
 	"fmt"
+	"log"
 	"github.com/spf13/cobra"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/teris-io/shortid"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/storage/memory"	
+	"os/exec"
+	"cherrybomb/constants"
 )
 
 // getGitConfig returns the global git configuration
@@ -20,17 +20,50 @@ func getGitConfig() (*config.Config, error) {
 }
 
 // Validate that at least one argument has been passed in
-func verifyCherrybombArgs(args *[]string) {
+func getSourceBranchName(args *[]string) string {
 	if len(*args) < 1 {
 		fmt.Println("Please specify a source branch for cherrybomb to pick from")
-		return
+		os.Exit(1)
 	}
+
+	return (*args)[0]
+}
+
+// Checkout a target branch and return the branch name
+func checkoutTargetBranch() string {
+	generatedBranchId, _ := shortid.Generate()
+	targetBranchName := constants.AppName + "-" + generatedBranchId
+	err := exec.Command("git", "checkout", "-b", targetBranchName, "--no-track", "origin/main").Run()
+	if err != nil {
+		log.Fatal("Failed to create target branch to bomb")
+	}
+	
+	return targetBranchName
+}
+
+// Fetch from the upstream repository
+func fetchUpstream(sourceBranchName *string) {
+	err := exec.Command("git", "fetch", "upstream", *sourceBranchName).Run()
+	if err != nil {
+		log.Fatalf("Failed to fetch from upstream for branch %s: %s", *sourceBranchName, err)
+	}
+	log.Printf("%s-logger: Succeeding in fetching from source branch")
+}
+
+func getCommitHashes(authorEmail *string, sourceBranchName *string) []string {
+	out, err := exec.Command("git", "log", "--left-right", "--graph", 
+	"--cherry-pick", "--no-merges", "--author", *authorEmail, "--oneline",
+	"--porcelain", "upstream/master..upstream/", sourceBranchName).CombinedOutput()
+	if err != nil {
+		log.Fatalf("Getting commit hashes %s: %s", *sourceBranchName, err)
+	}
+	log.Println(out)
 }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "cherrybomb",
-	Short: "A brief description of your application",
+	Short: "Utility for previewing and cherry-picking several commit hashes that ONLY you have authored, excluding merge commits",
 	Long: `A longer description that spans multiple lines and likely contains
 examples and usage of using your application. For example:
 
@@ -39,18 +72,24 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Example of getting git config
-		verifyCherrybombArgs(&args)
-		generatedBranchId, _ := shortid.Generate()
-		targetBranchName := "cherrybomb-" + generatedBranchId 
-		cwd := os.Getwd()
-		fmt.Println(targetBranchName)
-		r, err := git.PlainOpen(cwd)
-		cIter, err := r.Log()
-		err = cIter.ForEach(func (c *object.Commit) error {
-			fmt.Println(c)
+		sourceBranchName := getSourceBranchName(&args)
+		log.Printf("%s-logger: Running %s with source branch %s", 
+		constants.AppName, constants.AppName, sourceBranchName)
 
-			return nil
-		}) 
+		generatedBranchId, _ := shortid.Generate()
+		targetBranchName := constants.AppName + "-" + generatedBranchId 
+
+		log.Printf("%s-logger: Fetching from origin main\n", constants.AppName)
+		err := exec.Command("git", "fetch", "origin", "main").Run()
+		if err != nil {
+			fmt.Printf("Error on fetching origin main. %s\n", err)
+			log.Fatalf("%s-logger: %s\n", constants.AppName, err)
+		}
+
+		checkoutTargetBranch()
+		fetchUpstream()
+		getCommitHashes()
+		
 
 		cfg, err := getGitConfig()
 		if err != nil {

@@ -53,10 +53,12 @@ func fetchUpstream(sourceBranchName *string) {
 }
 
 func getCommitHashes(authorEmail *string, sourceBranchName *string) []string {
-	hashesOutOnly, _ := exec.Command("git", "log", "--pretty=%h", "--cherry", "--no-merges", string("--author=" + *authorEmail)).CombinedOutput()
+	hashesOutOnly, _ := exec.Command("git", "log", "--pretty=%h", "--cherry", "--no-merges", 
+	string("--author=" + *authorEmail), "..upstream/" + *sourceBranchName).CombinedOutput()
 	prettyFmtMsg := "--pretty=%h %s"
 	fmt.Println(prettyFmtMsg)
-	out, err := exec.Command("git", "log", prettyFmtMsg, "--cherry", "--no-merges", string("--author=" + *authorEmail)).CombinedOutput()
+	out, err := exec.Command("git", "log", prettyFmtMsg, "--cherry", "--no-merges", 
+	string("--author=" + *authorEmail) + "..upstream/" + *sourceBranchName).CombinedOutput()
 	if err != nil {
 		log.Fatalf("Error getting commit hashes %s: %s", *sourceBranchName, err)
 	}

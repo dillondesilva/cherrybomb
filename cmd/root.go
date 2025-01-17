@@ -12,6 +12,8 @@ import (
 	"github.com/teris-io/shortid"
 	"os/exec"
 	"cherrybomb/constants"
+	"github.com/manifoldco/promptui"
+	"strings"
 )
 
 // getGitConfig returns the global git configuration
@@ -51,13 +53,54 @@ func fetchUpstream(sourceBranchName *string) {
 }
 
 func getCommitHashes(authorEmail *string, sourceBranchName *string) []string {
-	out, err := exec.Command("git", "log", "--left-right", "--graph", 
-	"--cherry-pick", "--no-merges", "--author", *authorEmail, "--oneline",
-	"--porcelain", "upstream/master..upstream/", sourceBranchName).CombinedOutput()
+	hashesOutOnly, _ := exec.Command("git", "log", "--pretty=%h", "--cherry", "--no-merges", string("--author=" + *authorEmail)).CombinedOutput()
+	prettyFmtMsg := "--pretty=%h %s"
+	fmt.Println(prettyFmtMsg)
+	out, err := exec.Command("git", "log", prettyFmtMsg, "--cherry", "--no-merges", string("--author=" + *authorEmail)).CombinedOutput()
 	if err != nil {
-		log.Fatalf("Getting commit hashes %s: %s", *sourceBranchName, err)
+		log.Fatalf("Error getting commit hashes %s: %s", *sourceBranchName, err)
 	}
-	log.Println(out)
+
+	log.Printf("Bomb consists of the following commits:\n")
+	fmt.Printf(string(out))
+	hashes := strings.Split(string(hashesOutOnly), "\n")
+	return hashes
+}
+
+func getAuthorEmail() string {
+	out, err := exec.Command("git", "config", "user.email").Output()
+	if err != nil {
+		log.Fatalf("Error")
+	}
+	
+	return strings.TrimSpace(string(out))
+}
+
+func runCherrybomb(hashes *[]string) {
+	prompt := promptui.Select{
+		Label:    "Confirm bomb with these hashes? (yes/no)",
+		Items: []string{"Yes", "No"},
+	}
+
+	_, confirmResult, err := prompt.Run()
+
+	if err != nil {
+		fmt.Printf("Abort bomb %v\n", err)
+		return
+	}
+
+	if confirmResult == "No" {
+		return
+	}
+
+	spaceSeperatedHashes := strings.Join(*hashes, " ")
+	log.Println("git", "cherry-pick", spaceSeperatedHashes)
+
+	out, cpErr := exec.Command("git", "cherry-pick", spaceSeperatedHashes).CombinedOutput()
+	log.Printf(string(out))
+	if cpErr != nil {
+		log.Fatalf("Failed")
+	}
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -76,9 +119,6 @@ to quickly create a Cobra application.`,
 		log.Printf("%s-logger: Running %s with source branch %s", 
 		constants.AppName, constants.AppName, sourceBranchName)
 
-		generatedBranchId, _ := shortid.Generate()
-		targetBranchName := constants.AppName + "-" + generatedBranchId 
-
 		log.Printf("%s-logger: Fetching from origin main\n", constants.AppName)
 		err := exec.Command("git", "fetch", "origin", "main").Run()
 		if err != nil {
@@ -87,22 +127,12 @@ to quickly create a Cobra application.`,
 		}
 
 		checkoutTargetBranch()
-		fetchUpstream()
-		getCommitHashes()
-		
-
-		cfg, err := getGitConfig()
-		if err != nil {
-			fmt.Printf("Error loading git config: %v\n", err)
-			return
-		}
+		fetchUpstream(&sourceBranchName)
 
 		// Get user email
-		email := cfg.User.Email
-		name := cfg.User.Name
-		
-		fmt.Printf("Git User Name: %s\n", name)
-		fmt.Printf("Git User Email: %s\n", email)
+		email := getAuthorEmail()
+		hashes := getCommitHashes(&email, &sourceBranchName)
+		runCherrybomb(&hashes)
 	},
 }
 
